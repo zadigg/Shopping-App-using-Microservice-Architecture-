@@ -1,5 +1,6 @@
 package com.abelkibebe.orderservice.service;
 
+import com.abelkibebe.orderservice.dto.InventoryResponse;
 import com.abelkibebe.orderservice.dto.OrderLineItemsDTO;
 import com.abelkibebe.orderservice.dto.OrderRequest;
 import com.abelkibebe.orderservice.model.Order;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,7 +22,7 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final WebClient webClient;
-    public void placeOrder(OrderRequest orderRequest){
+    public String placeOrder(OrderRequest orderRequest){
         Order order = new Order();
         order.setOrderNumber(UUID.randomUUID().toString());
         List<OrderLineItems> orderLineItems = orderRequest.getOrderLineItemsDTOList()
@@ -35,20 +37,26 @@ public class OrderService {
                 .toList();
 
         //call Inventory service, and place order if product is in stock
-        Boolean result = webClient.get()
-                .uri("http://localhost:8082/api/inventory")
+        InventoryResponse[] inventoryResponsesArray = webClient.get()
+                .uri("http://localhost:8082/api/inventory",
+                        uriBuilder -> uriBuilder.queryParam("skuCode", skuCodes).build())
                 .retrieve()
-                .bodyToMono(Boolean.class)
+                .bodyToMono(InventoryResponse[].class)
                 .block();
 
-        if (result){
+
+        assert inventoryResponsesArray != null;
+        boolean allProductsInStock = Arrays.stream(inventoryResponsesArray)
+                .allMatch(InventoryResponse::isInStock);
+
+        if (allProductsInStock) {
             orderRepository.save(order);
-        }else{
+            // publish Order Placed Event
+//            applicationEventPublisher.publishEvent(new OrderPlacedEvent(this, order.getOrderNumber()));
+            return "Order Placed";
+        } else {
             throw new IllegalArgumentException("Product is not in stock, please try again later");
         }
-
-
-        orderRepository.save(order);
     }
 
     private OrderLineItems mapToDto(OrderLineItemsDTO orderLineItemsDTO) {
